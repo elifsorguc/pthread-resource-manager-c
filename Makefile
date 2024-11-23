@@ -1,36 +1,11 @@
-# Compiler and flags
-CC = gcc
-CFLAGS = -Wall -pthread
+all: libreman.a app
 
-# Target executable and library names
-LIBRARY = libreman.a
-TEST_APP = myapp
+libreman.a: reman.c
+	gcc -Wall -c reman.c
+	ar -cvq libreman.a reman.o
+	ranlib libreman.a
 
-# Source files
-LIB_SRC = reman.c
-LIB_OBJ = reman.o
-TEST_SRC = myapp.c
-
-# Build all targets
-all: $(LIBRARY) $(TEST_APP)
-
-# Create the static library libreman.a
-$(LIBRARY): $(LIB_OBJ)
-	@ar -cvq $@ $^
-	@ranlib $@
-
-# Compile the library source to object file
-$(LIB_OBJ): $(LIB_SRC)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-# Compile the test application and link with the library
-$(TEST_APP): $(TEST_SRC) $(LIBRARY)
-	$(CC) $(CFLAGS) -o $@ $^ -L. -lreman
-
-# Clean up generated files
+app: app.c
+	gcc -Wall -o app app.c -L. -lreman -lpthread
 clean:
-	rm -f $(LIB_OBJ) $(LIBRARY) $(TEST_APP) *.o *~
-
-# Run the test application
-run: $(TEST_APP)
-	./$(TEST_APP) 1
+	rm -fr *.o *.a *~ a.out app reman.o reman.a libreman.a
