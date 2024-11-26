@@ -3,200 +3,218 @@
 #include <stdlib.h>
 #include "reman.h"
 
-// Global Definitions/Variables
-int available[MAXR];        // Available resources
-int max_claim[MAXT][MAXR];  // Maximum claim for each thread
-int allocation[MAXT][MAXR]; // Current allocation for each thread
-int request[MAXT][MAXR];    // Pending resource requests
-int connected[MAXT];        // Tracks if threads are connected
-int total_threads = 0;      // Total number of threads
-int total_resources = 0;    // Total number of resources
-int deadlock_avoidance = 0; // Flag for deadlock avoidance
+// Global variables
+#define MAXR 1000
+#define MAXT 100
 
-pthread_mutex_t resource_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t resource_cond = PTHREAD_COND_INITIALIZER;
+int num_threads, num_resources, deadlock_avoidance;
+int available[MAXR];                  // Tracks available resources
+int allocated[MAXT][MAXR];            // Tracks resources allocated to threads
+int requested[MAXT][MAXR];            // Tracks requests made by threads
+int max_claim[MAXT][MAXR];            // Tracks maximum claims of threads
+pthread_mutex_t lock;                 // Mutex for thread synchronization
+pthread_cond_t cond[MAXT];            // Condition variables for blocking threads
+int thread_status[MAXT] = {0};        // Tracks active threads
+pthread_t thread_ids[MAXT];           // Maps pthread_self() to logical tid
 
-int reman_init(int t_count, int r_count, int avoid)
-{
-    if (t_count > MAXT || r_count > MAXR || t_count <= 0 || r_count <= 0)
-    {
-        return -1; // Invalid parameters
+// Helper function to find the tid of the calling thread
+int find_tid() {
+    pthread_t self = pthread_self();
+    for (int i = 0; i < num_threads; i++) {
+        if (pthread_equal(thread_ids[i], self)) {
+            return i;
+        }
     }
+    return -1; // Thread not found
+}
 
-    pthread_mutex_lock(&resource_mutex);
+// reman_init: Initializes the library
+int reman_init(int t_count, int r_count, int avoid) {
+    if (t_count > MAXT || r_count > MAXR) return -1; // Check for limits
 
-    total_threads = t_count;
-    total_resources = r_count;
+    num_threads = t_count;
+    num_resources = r_count;
     deadlock_avoidance = avoid;
 
-    for (int i = 0; i < r_count; i++)
-    {
-        available[i] = 1; // Initialize each resource as available
+    pthread_mutex_init(&lock, NULL);
+    for (int i = 0; i < num_threads; i++) {
+        pthread_cond_init(&cond[i], NULL);
     }
 
-    for (int i = 0; i < t_count; i++)
-    {
-        connected[i] = 0;
-        for (int j = 0; j < r_count; j++)
-        {
+    for (int i = 0; i < num_resources; i++) {
+        available[i] = 1; // Initialize all resources as available
+    }
+
+    // Initialize resource tracking arrays
+    for (int i = 0; i < num_threads; i++) {
+        for (int j = 0; j < num_resources; j++) {
+            allocated[i][j] = 0;
+            requested[i][j] = 0;
             max_claim[i][j] = 0;
-            allocation[i][j] = 0;
-            request[i][j] = 0;
         }
     }
 
-    pthread_mutex_unlock(&resource_mutex);
     return 0;
 }
 
-int reman_connect(int tid)
-{
-    if (tid < 0 || tid >= total_threads)
-    {
-        return -1;
-    }
+// reman_connect: Registers a thread in the library
+int reman_connect(int tid) {
+    if (tid < 0 || tid >= num_threads) return -1;
 
-    pthread_mutex_lock(&resource_mutex);
-    connected[tid] = 1;
-    pthread_mutex_unlock(&resource_mutex);
+    pthread_mutex_lock(&lock);
+    thread_ids[tid] = pthread_self(); // Map this thread's tid to its pthread_self()
+    thread_status[tid] = 1;           // Mark thread as active
+    pthread_mutex_unlock(&lock);
+
     return 0;
 }
 
-int reman_disconnect()
-{
-    pthread_mutex_lock(&resource_mutex);
-
-    for (int i = 0; i < total_threads; i++)
-    {
-        if (connected[i])
-        {
-            for (int j = 0; j < total_resources; j++)
-            {
-                available[j] += allocation[i][j];
-                allocation[i][j] = 0;
-            }
-            connected[i] = 0;
-        }
+// reman_disconnect: Unregisters a thread
+int reman_disconnect() {
+    pthread_mutex_lock(&lock);
+    int tid = find_tid();
+    if (tid == -1) {
+        pthread_mutex_unlock(&lock);
+        return -1; // Thread not registered
     }
-
-    pthread_cond_broadcast(&resource_cond);
-    pthread_mutex_unlock(&resource_mutex);
+    thread_status[tid] = 0; // Mark thread as inactive
+    pthread_mutex_unlock(&lock);
     return 0;
 }
 
-int reman_claim(int claim[])
-{
-    pthread_mutex_lock(&resource_mutex);
-
-    for (int i = 0; i < total_resources; i++)
-    {
-        if (claim[i] < 0 || claim[i] > 1)
-        {
-            pthread_mutex_unlock(&resource_mutex);
-            return -1; // Invalid claim
-        }
+// reman_claim: Sets a thread's maximum claim for resources
+int reman_claim(int claim[]) {
+    pthread_mutex_lock(&lock);
+    int tid = find_tid();
+    if (tid == -1) {
+        pthread_mutex_unlock(&lock);
+        return -1; // Thread not registered
     }
 
-    for (int t = 0; t < total_threads; t++)
-    {
-        for (int r = 0; r < total_resources; r++)
-        {
-            max_claim[t][r] = claim[r];
-        }
+    // Set the max_claim for this thread
+    for (int i = 0; i < num_resources; i++) {
+        max_claim[tid][i] = claim[i];
     }
 
-    pthread_mutex_unlock(&resource_mutex);
+    pthread_mutex_unlock(&lock);
     return 0;
 }
 
-int reman_request(int req[])
-{
-    pthread_mutex_lock(&resource_mutex);
+// reman_request: Handles resource requests by threads
+int reman_request(int request[]) {
+    pthread_mutex_lock(&lock);
+    int tid = find_tid();
+    if (tid == -1) {
+        pthread_mutex_unlock(&lock);
+        return -1; // Thread not registered
+    }
 
-    for (int i = 0; i < total_resources; i++)
-    {
-        if (req[i] < 0 || req[i] > 1 || req[i] > available[i])
-        {
-            pthread_mutex_unlock(&resource_mutex);
-            return -1; // Invalid request
+    // Check if the requested resources can be allocated
+    int can_allocate = 1;
+    for (int i = 0; i < num_resources; i++) {
+        if (request[i] > available[i] || request[i] + allocated[tid][i] > max_claim[tid][i]) {
+            can_allocate = 0;
+            break;
         }
     }
 
-    for (int t = 0; t < total_threads; t++)
-    {
-        for (int r = 0; r < total_resources; r++)
-        {
-            allocation[t][r] += req[r];
-            available[r] -= req[r];
+    if (can_allocate) {
+        // Allocate resources
+        for (int i = 0; i < num_resources; i++) {
+            available[i] -= request[i];
+            allocated[tid][i] += request[i];
         }
+    } else {
+        // Block the thread if resources are unavailable
+        requested[tid][i] = request[i];
+        pthread_cond_wait(&cond[tid], &lock);
     }
 
-    pthread_mutex_unlock(&resource_mutex);
-    return 0;
+    pthread_mutex_unlock(&lock);
+    return can_allocate ? 0 : -1;
 }
 
-int reman_release(int release[])
-{
-    pthread_mutex_lock(&resource_mutex);
+// reman_release: Releases resources held by a thread
+int reman_release(int release[]) {
+    pthread_mutex_lock(&lock);
+    int tid = find_tid();
+    if (tid == -1) {
+        pthread_mutex_unlock(&lock);
+        return -1; // Thread not registered
+    }
 
-    for (int i = 0; i < total_resources; i++)
-    {
-        if (release[i] < 0 || release[i] > allocation[0][i])
-        {
-            pthread_mutex_unlock(&resource_mutex);
+    // Release resources
+    for (int i = 0; i < num_resources; i++) {
+        if (release[i] > allocated[tid][i]) {
+            pthread_mutex_unlock(&lock);
             return -1; // Invalid release
         }
-        allocation[0][i] -= release[i];
         available[i] += release[i];
+        allocated[tid][i] -= release[i];
     }
 
-    pthread_cond_broadcast(&resource_cond);
-    pthread_mutex_unlock(&resource_mutex);
+    // Notify all waiting threads
+    pthread_cond_broadcast(&cond[tid]);
+
+    pthread_mutex_unlock(&lock);
     return 0;
 }
 
-int reman_detect()
-{
-    pthread_mutex_lock(&resource_mutex);
+// reman_detect: Detects deadlocks using a simple detection mechanism
+int reman_detect() {
+    pthread_mutex_lock(&lock);
 
-    int finish[MAXT] = {0};
-    int work[MAXR];
-    for (int i = 0; i < total_resources; i++)
-    {
-        work[i] = available[i];
-    }
-
-    for (int i = 0; i < total_threads; i++)
-    {
-        if (!finish[i])
-        {
-            for (int j = 0; j < total_resources; j++)
-            {
-                if (request[i][j] <= work[j])
-                {
-                    work[j] += allocation[i][j];
-                }
+    // Simulated deadlock detection: count threads with unmet requests
+    int deadlock_count = 0;
+    for (int tid = 0; tid < num_threads; tid++) {
+        int has_unmet_request = 0;
+        for (int i = 0; i < num_resources; i++) {
+            if (requested[tid][i] > 0) {
+                has_unmet_request = 1;
+                break;
             }
-            finish[i] = 1;
         }
+        if (has_unmet_request) deadlock_count++;
     }
 
-    pthread_mutex_unlock(&resource_mutex);
-    return 0;
+    pthread_mutex_unlock(&lock);
+    return deadlock_count;
 }
 
-void reman_print(char title[])
-{
-    pthread_mutex_lock(&resource_mutex);
+// reman_print: Prints the current state of resources
+void reman_print(char title[]) {
+    pthread_mutex_lock(&lock);
+
     printf("##########################\n");
     printf("%s\n", title);
-    printf("Available Resources:\n");
+    printf("##########################\n");
 
-    for (int i = 0; i < total_resources; i++)
-    {
-        printf("%d ", available[i]);
+    printf("Resource Count: %d\n", num_resources);
+    printf("Thread Count: %d\n", num_threads);
+
+    printf("\nAvailable Resources:\n");
+    for (int i = 0; i < num_resources; i++) {
+        printf("R%d: %d ", i, available[i]);
+    }
+    printf("\n");
+
+    printf("\nMaximum Claim:\n");
+    for (int tid = 0; tid < num_threads; tid++) {
+        printf("T%d: ", tid);
+        for (int i = 0; i < num_resources; i++) {
+            printf("%d ", max_claim[tid][i]);
+        }
+        printf("\n");
     }
 
-    printf("\n##########################\n");
-    pthread_mutex_unlock(&resource_mutex);
+    printf("\nAllocated Resources:\n");
+    for (int tid = 0; tid < num_threads; tid++) {
+        printf("T%d: ", tid);
+        for (int i = 0; i < num_resources; i++) {
+            printf("%d ", allocated[tid][i]);
+        }
+        printf("\n");
+    }
+
+    pthread_mutex_unlock(&lock);
 }
