@@ -28,6 +28,47 @@ int find_tid() {
     return -1; // Thread not found
 }
 
+// Helper function: Check if the system is in a safe state
+int is_safe_state() {
+    int work[MAXR];
+    int finish[MAXT] = {0};
+
+    // Initialize work with available resources
+    for (int i = 0; i < num_resources; i++) {
+        work[i] = available[i];
+    }
+
+    // Try to find a sequence where all threads can finish
+    int found = 1;
+    while (found) {
+        found = 0;
+        for (int tid = 0; tid < num_threads; tid++) {
+            if (!finish[tid]) {
+                int can_finish = 1;
+                for (int i = 0; i < num_resources; i++) {
+                    if (requested[tid][i] > work[i]) {
+                        can_finish = 0;
+                        break;
+                    }
+                }
+                if (can_finish) {
+                    for (int i = 0; i < num_resources; i++) {
+                        work[i] += allocated[tid][i];
+                    }
+                    finish[tid] = 1;
+                    found = 1;
+                }
+            }
+        }
+    }
+
+    // Check if all threads can finish
+    for (int tid = 0; tid < num_threads; tid++) {
+        if (!finish[tid]) return 0; // Not safe
+    }
+    return 1; // Safe state
+}
+
 // reman_init: Initializes the library
 int reman_init(int t_count, int r_count, int avoid) {
     if (t_count > MAXT || r_count > MAXR) return -1; // Check for limits
@@ -109,31 +150,46 @@ int reman_request(int request[]) {
         return -1; // Thread not registered
     }
 
-    // Check if the requested resources can be allocated
-    int can_allocate = 1;
-    for (int i = 0; i < num_resources; i++) {
-        if (request[i] > available[i] || request[i] + allocated[tid][i] > max_claim[tid][i]) {
-            can_allocate = 0;
-        }
-        requested[tid][i] = request[i]; // Record the request regardless
-    }
+    while (1) { // Loop to retry the request
+        int can_allocate = 1;
 
-    if (can_allocate) {
-        // Allocate resources
+        // Check if the request is valid
         for (int i = 0; i < num_resources; i++) {
-            available[i] -= request[i];
-            allocated[tid][i] += request[i];
-            requested[tid][i] = 0; // Clear the request after allocation
+            if (request[i] > available[i] || request[i] + allocated[tid][i] > max_claim[tid][i]) {
+                can_allocate = 0;
+                break;
+            }
+            requested[tid][i] = request[i];
         }
-    } else {
-        // Block the thread if resources are unavailable
-        pthread_cond_wait(&cond[tid], &lock);
+
+        if (can_allocate) {
+            // Temporarily allocate resources
+            for (int i = 0; i < num_resources; i++) {
+                available[i] -= request[i];
+                allocated[tid][i] += request[i];
+                requested[tid][i] = 0;
+            }
+
+            // If deadlock avoidance is enabled, check for a safe state
+            if (deadlock_avoidance && !is_safe_state()) {
+                // Roll back allocation
+                for (int i = 0; i < num_resources; i++) {
+                    available[i] += request[i];
+                    allocated[tid][i] -= request[i];
+                    requested[tid][i] = request[i];
+                }
+                pthread_mutex_unlock(&lock);
+                return -1; // Unsafe state
+            }
+
+            pthread_mutex_unlock(&lock);
+            return 0; // Allocation successful
+        } else {
+            // Block the thread if resources are unavailable
+            pthread_cond_wait(&cond[tid], &lock);
+        }
     }
-
-    pthread_mutex_unlock(&lock);
-    return can_allocate ? 0 : -1;
 }
-
 
 // reman_release: Releases resources held by a thread
 int reman_release(int release[]) {
@@ -165,7 +221,6 @@ int reman_release(int release[]) {
 int reman_detect() {
     pthread_mutex_lock(&lock);
 
-    // Simulated deadlock detection: count threads with unmet requests
     int deadlock_count = 0;
     for (int tid = 0; tid < num_threads; tid++) {
         int has_unmet_request = 0;
