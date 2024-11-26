@@ -114,8 +114,8 @@ int reman_request(int request[]) {
     for (int i = 0; i < num_resources; i++) {
         if (request[i] > available[i] || request[i] + allocated[tid][i] > max_claim[tid][i]) {
             can_allocate = 0;
-            break;
         }
+        requested[tid][i] = request[i]; // Record the request regardless
     }
 
     if (can_allocate) {
@@ -123,16 +123,17 @@ int reman_request(int request[]) {
         for (int i = 0; i < num_resources; i++) {
             available[i] -= request[i];
             allocated[tid][i] += request[i];
+            requested[tid][i] = 0; // Clear the request after allocation
         }
     } else {
         // Block the thread if resources are unavailable
-        requested[tid][i] = request[i];
         pthread_cond_wait(&cond[tid], &lock);
     }
 
     pthread_mutex_unlock(&lock);
     return can_allocate ? 0 : -1;
 }
+
 
 // reman_release: Releases resources held by a thread
 int reman_release(int release[]) {
