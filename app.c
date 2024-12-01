@@ -57,7 +57,9 @@ void *threadfunc1(void *a)
     pr(tid, "REQ", NUMR, request2);
     reman_request(request2);
     reman_release(request1);
+    reman_print("State after releasing request1 by Thread 0");
     reman_release(request2);
+    reman_print("State after releasing request2 by Thread 0");
     reman_disconnect();
     pthread_exit(NULL);
 }
@@ -80,7 +82,9 @@ void *threadfunc2(void *a)
     pr(tid, "REQ", NUMR, request2);
     reman_request(request2);
     reman_release(request1);
+    reman_print("State after releasing request1 by Thread 1");
     reman_release(request2);
+    reman_print("State after releasing request2 by Thread 1");
     reman_disconnect();
     pthread_exit(NULL);
 }
