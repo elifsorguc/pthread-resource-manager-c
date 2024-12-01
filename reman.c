@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <stdlib.h>
+#include <time.h>  // For time-related functions and structures
+#include <errno.h> // For error codes like ETIMEDOUT
 #include "reman.h"
 
 // Global variables
@@ -203,6 +205,7 @@ int reman_request(int request[])
     {
         int can_allocate = 1;
 
+        // Validate the request
         for (int i = 0; i < num_resources; i++)
         {
             if (request[i] > available[i] || request[i] + allocated[tid][i] > max_claim[tid][i])
@@ -215,6 +218,7 @@ int reman_request(int request[])
 
         if (can_allocate)
         {
+            // Allocate resources
             printf("[DEBUG] Allocating resources to Thread %d.\n", tid);
             for (int i = 0; i < num_resources; i++)
             {
@@ -223,6 +227,7 @@ int reman_request(int request[])
                 requested[tid][i] = 0;
             }
 
+            // Check safe state if deadlock avoidance is enabled
             if (deadlock_avoidance && !is_safe_state())
             {
                 printf("[DEBUG] Unsafe state detected. Rolling back allocation for Thread %d.\n", tid);
@@ -237,12 +242,28 @@ int reman_request(int request[])
             }
 
             pthread_mutex_unlock(&lock);
-            return 0;
+            return 0; // Allocation successful
         }
         else
         {
+            // Prepare for timeout-based wait
             printf("[DEBUG] Thread %d is waiting for resources.\n", tid);
-            pthread_cond_wait(&cond[tid], &lock);
+            struct timespec ts;
+            clock_gettime(CLOCK_REALTIME, &ts);
+            ts.tv_sec += 2; // Wait for 2 seconds
+
+            int err = pthread_cond_timedwait(&cond[tid], &lock, &ts);
+            if (err == ETIMEDOUT)
+            {
+                printf("[DEBUG] Thread %d timed out. Releasing held resources and retrying.\n", tid);
+                for (int i = 0; i < num_resources; i++)
+                {
+                    available[i] += allocated[tid][i];
+                    allocated[tid][i] = 0; // Release resources
+                }
+                pthread_mutex_unlock(&lock);
+                pthread_mutex_lock(&lock); // Retry the request
+            }
         }
     }
 }
@@ -278,20 +299,21 @@ int reman_detect()
     pthread_mutex_lock(&lock);
 
     int deadlock_count = 0;
-    printf("[DEBUG] Detecting deadlocks...\n");
     for (int tid = 0; tid < num_threads; tid++)
     {
-        int has_unmet_request = 0;
+        int is_waiting = 1;
         for (int i = 0; i < num_resources; i++)
         {
             if (requested[tid][i] > 0)
             {
-                has_unmet_request = 1;
+                is_waiting = 0;
                 break;
             }
         }
-        if (has_unmet_request)
+        if (is_waiting && thread_status[tid])
+        {
             deadlock_count++;
+        }
     }
 
     printf("[DEBUG] Deadlocks detected: %d\n", deadlock_count);
