@@ -93,6 +93,8 @@ int reman_init(int t_count, int r_count, int avoid) {
             max_claim[i][j] = 0;
         }
     }
+    printf("[DEBUG] Resource manager initialized with %d threads, %d resources, deadlock avoidance: %s.\n",
+           t_count, r_count, avoid ? "Enabled" : "Disabled");
     return 0;
 }
 
@@ -152,25 +154,41 @@ int reman_request(int request[]) {
                 can_allocate = 0;
                 break;
             }
-            requested[tid][i] = request[i];
         }
 
         if (can_allocate) {
+            // Deadlock avoidance mode: Check if the state is safe before allocating
+            if (deadlock_avoidance) {
+                // Temporarily allocate resources to test for safe state
+                for (int i = 0; i < num_resources; i++) {
+                    available[i] -= request[i];
+                    allocated[tid][i] += request[i];
+                }
+
+                if (!is_safe_state()) {
+                    // Rollback allocation if state is unsafe
+                    printf("debug: is not safe!!!!");
+                    for (int i = 0; i < num_resources; i++) {
+                        available[i] += request[i];
+                        allocated[tid][i] -= request[i];
+                    }
+                    pthread_mutex_unlock(&lock);
+                    return -1; // Deny request to avoid unsafe state
+                }
+                printf("debug: is safe!!!!");
+            } else {
+                // No deadlock avoidance: Allocate resources immediately
+                for (int i = 0; i < num_resources; i++) {
+                    available[i] -= request[i];
+                    allocated[tid][i] += request[i];
+                }
+            }
+
+            // Reset request since it's now fulfilled
             for (int i = 0; i < num_resources; i++) {
-                available[i] -= request[i];
-                allocated[tid][i] += request[i];
                 requested[tid][i] = 0;
             }
 
-            if (deadlock_avoidance && !is_safe_state()) {
-                for (int i = 0; i < num_resources; i++) {
-                    available[i] += request[i];
-                    allocated[tid][i] -= request[i];
-                    requested[tid][i] = request[i];
-                }
-                pthread_mutex_unlock(&lock);
-                return -1;
-            }
             pthread_mutex_unlock(&lock);
             return 0;
         } else {
@@ -208,6 +226,9 @@ int reman_detect() {
     pthread_mutex_lock(&lock);
     int deadlock_count = 0;
 
+    // Array to track which threads are in deadlock
+    int deadlocked_threads[MAXT] = {0};
+
     for (int tid = 0; tid < num_threads; tid++) {
         int is_stuck = 1;
         for (int i = 0; i < num_resources; i++) {
@@ -216,21 +237,33 @@ int reman_detect() {
                 break;
             }
         }
-        if (is_stuck && thread_status[tid]) {
+        if (is_stuck && thread_status[tid] && allocated[tid][0] > 0) {
+            deadlocked_threads[tid] = 1;
             deadlock_count++;
         }
     }
 
     if (deadlock_count > 0) {
+        printf("[DEBUG] Deadlock detected with %d threads.\n", deadlock_count);
+
+        // Preempt resources from deadlocked threads
         for (int tid = 0; tid < num_threads; tid++) {
-            pthread_cond_broadcast(&cond[tid]);
+            if (deadlocked_threads[tid]) {
+                printf("[DEBUG] Preempting resources from Thread %d.\n", tid);
+                for (int i = 0; i < num_resources; i++) {
+                    available[i] += allocated[tid][i];
+                    allocated[tid][i] = 0;
+                }
+                pthread_cond_broadcast(&cond[0]); // Notify waiting threads
+            }
         }
+    } else {
+        printf("[DEBUG] No deadlocks detected.\n");
     }
 
     pthread_mutex_unlock(&lock);
     return deadlock_count;
 }
-
 void reman_print(char title[]) {
     pthread_mutex_lock(&lock);
     printf("##########################\n");
