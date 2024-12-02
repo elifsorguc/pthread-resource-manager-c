@@ -5,8 +5,8 @@ libreman.a: reman.c
 	ar -cvq libreman.a reman.o
 	ranlib libreman.a
 
-app: try.c
-	gcc -Wall -o app try.c -L. -lreman -lpthread
+app: exp.c
+	gcc -Wall -o app exp.c -L. -lreman -lpthread
 
 clean:
 	rm -f *.o *.a app

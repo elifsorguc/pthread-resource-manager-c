@@ -34,6 +34,8 @@ int is_safe_state() {
     int work[MAXR];
     int finish[MAXT] = {0};
 
+    printf("[DEBUG] Checking safe state...\n");
+
     for (int i = 0; i < num_resources; i++) {
         work[i] = available[i];
     }
@@ -51,6 +53,7 @@ int is_safe_state() {
                     }
                 }
                 if (can_finish) {
+                    printf("[DEBUG] Thread %d can finish. Releasing resources.\n", tid);
                     for (int i = 0; i < num_resources; i++) {
                         work[i] += allocated[tid][i];
                     }
@@ -63,9 +66,12 @@ int is_safe_state() {
 
     for (int tid = 0; tid < num_threads; tid++) {
         if (!finish[tid]) {
+            printf("[DEBUG] System is in an unsafe state.\n");
             return 0;
         }
     }
+
+    printf("[DEBUG] System is in a safe state.\n");
     return 1;
 }
 
@@ -167,7 +173,6 @@ int reman_request(int request[]) {
 
                 if (!is_safe_state()) {
                     // Rollback allocation if state is unsafe
-                    printf("debug: is not safe!!!!");
                     for (int i = 0; i < num_resources; i++) {
                         available[i] += request[i];
                         allocated[tid][i] -= request[i];
@@ -175,7 +180,7 @@ int reman_request(int request[]) {
                     pthread_mutex_unlock(&lock);
                     return -1; // Deny request to avoid unsafe state
                 }
-                printf("debug: is safe!!!!");
+                
             } else {
                 // No deadlock avoidance: Allocate resources immediately
                 for (int i = 0; i < num_resources; i++) {
