@@ -49,7 +49,7 @@ void *threadfunc1(void *a)
 
     tid = *((int *)a);
     reman_connect(tid);
-    setarray(claim, NUMR, 1, 1, 1, 0, 0); // Claim resources
+    setarray(claim, NUMR, 1, 0, 1, 1, 0); // Claim resources
     reman_claim(claim);
 
     setarray(request1, NUMR, 1, 0, 0, 0, 0); // Request resources
@@ -61,7 +61,7 @@ void *threadfunc1(void *a)
     }
     sleep(2);
 
-    setarray(request2, NUMR, 0, 1, 0, 0, 0); // Request additional resources
+    setarray(request2, NUMR, 0, 0, 1, 0, 0); // Request additional resources
     pr(tid, "REQ", NUMR, request2);
     if (reman_request(request2) == 0)
     {
@@ -87,7 +87,7 @@ void *threadfunc2(void *a)
 
     tid = *((int *)a);
     reman_connect(tid);
-    setarray(claim, NUMR, 0, 1, 1, 1, 0); // Claim resources
+    setarray(claim, NUMR, 0, 1, 1, 0, 1); // Claim resources
     reman_claim(claim);
 
     setarray(request1, NUMR, 0, 1, 0, 0, 0); // Request resources
@@ -99,7 +99,7 @@ void *threadfunc2(void *a)
     }
     sleep(3);
 
-    setarray(request2, NUMR, 0, 0, 1, 0, 0); // Request additional resources
+    setarray(request2, NUMR, 0, 0, 0, 1, 0); // Request additional resources
     pr(tid, "REQ", NUMR, request2);
     if (reman_request(request2) == 0)
     {
@@ -125,10 +125,10 @@ void *threadfunc3(void *a)
 
     tid = *((int *)a);
     reman_connect(tid);
-    setarray(claim, NUMR, 1, 0, 0, 1, 1); // Claim resources
+    setarray(claim, NUMR, 0, 1, 0, 1, 1); // Claim resources
     reman_claim(claim);
 
-    setarray(request1, NUMR, 1, 0, 0, 0, 0); // Request resources
+    setarray(request1, NUMR, 0, 0, 0, 1, 0); // Request resources
     pr(tid, "REQ", NUMR, request1);
     if (reman_request(request1) == 0)
     {
@@ -137,7 +137,7 @@ void *threadfunc3(void *a)
     }
     sleep(4);
 
-    setarray(request2, NUMR, 0, 0, 0, 1, 1); // Request additional resources
+    setarray(request2, NUMR, 0, 1, 0, 0, 1); // Request additional resources
     pr(tid, "REQ", NUMR, request2);
     if (reman_request(request2) == 0)
     {
