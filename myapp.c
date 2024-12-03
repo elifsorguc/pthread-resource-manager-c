@@ -56,7 +56,7 @@ void *threadfunc1(void *a)
     pr(tid, "REQ", NUMR, request1);
     if (reman_request(request1) == 0)
     {
-        state_changed = 1; // Mark state as changed after allocation
+        state_changed = 1; // flag
         reman_print("State after request by Thread 0");
     }
     sleep(2);
@@ -65,14 +65,14 @@ void *threadfunc1(void *a)
     pr(tid, "REQ", NUMR, request2);
     if (reman_request(request2) == 0)
     {
-        state_changed = 1; // Mark state as changed after allocation
+        state_changed = 1; // flag
         reman_print("State after additional request by Thread 0");
     }
 
     reman_release(request1);
     state_changed = 1;
-    reman_print("State after releasing resources by Thread 0");
     reman_release(request2);
+    reman_print("State after releasing resources by Thread 0");
 
     reman_disconnect();
     pthread_exit(NULL);
@@ -108,9 +108,10 @@ void *threadfunc2(void *a)
     }
 
     reman_release(request1);
-    state_changed = 1;
-    reman_print("State after releasing resources by Thread 1");
+    state_changed = 1; // flag
+
     reman_release(request2);
+    reman_print("State after releasing resources by Thread 1");
 
     reman_disconnect();
     pthread_exit(NULL);
@@ -132,7 +133,7 @@ void *threadfunc3(void *a)
     pr(tid, "REQ", NUMR, request1);
     if (reman_request(request1) == 0)
     {
-        state_changed = 1; // Mark state as changed after allocation
+        state_changed = 1; // flag
         reman_print("State after request by Thread 2");
     }
     sleep(4);
@@ -141,15 +142,15 @@ void *threadfunc3(void *a)
     pr(tid, "REQ", NUMR, request2);
     if (reman_request(request2) == 0)
     {
-        state_changed = 1; // Mark state as changed after allocation
+        state_changed = 1; // flag
+
         reman_print("State after additional request by Thread 2");
     }
 
     reman_release(request1);
     state_changed = 1;
-    reman_print("State after releasing resources by Thread 2");
     reman_release(request2);
-
+    reman_print("State after releasing resources by Thread 2");
     reman_disconnect();
     pthread_exit(NULL);
 }
