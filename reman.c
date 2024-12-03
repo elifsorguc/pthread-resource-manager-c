@@ -179,56 +179,60 @@ int reman_request(int request[]) {
     }
     printf("\n");
 
-    // Check if request exceeds availability or max claim
+    // Check if the request exceeds the thread's maximum claim
     for (int i = 0; i < num_resources; i++) {
-        if (request[i] > available[i] || request[i] + allocated[tid][i] > max_claim[tid][i]) {
-            printf("[DEBUG] Request exceeds availability or maximum claim. Thread %d will block.\n", tid);
-
-            // Mark the request and block thread
-            for (int j = 0; j < num_resources; j++) {
-                requested[tid][j] = request[j];
-            }
-
-            // Wait until resources are released
-            struct timespec ts;
-            clock_gettime(CLOCK_REALTIME, &ts);
-            ts.tv_sec += TIMEOUT;
-
-            int res = pthread_cond_timedwait(&cond[tid], &lock, &ts);
-            if (res == ETIMEDOUT) {
-                printf("[DEBUG] Timeout occurred for Thread %d.\n", tid);
-                pthread_mutex_unlock(&lock);
-                return -1; // Timeout
-            }
+        if (request[i] + allocated[tid][i] > max_claim[tid][i]) {
+            printf("[DEBUG] Request exceeds maximum claim for Thread %d.\n", tid);
+            pthread_mutex_unlock(&lock);
+            return -1; // Deny request
         }
     }
 
-    // Temporarily allocate resources for safety check
-    for (int i = 0; i < num_resources; i++) {
-        available[i] -= request[i];
-        allocated[tid][i] += request[i];
-    }
-
-    if (deadlock_avoidance && !is_safe_state()) {
-        // Rollback if unsafe
+    // If deadlock avoidance is enabled, check for safety
+    if (deadlock_avoidance) {
+        // Temporarily allocate resources to check for safety
         for (int i = 0; i < num_resources; i++) {
-            available[i] += request[i];
-            allocated[tid][i] -= request[i];
+            available[i] -= request[i];
+            allocated[tid][i] += request[i];
         }
-        printf("[DEBUG] Unsafe state detected: Request denied for Thread %d.\n", tid);
-        pthread_mutex_unlock(&lock);
-        return -1; // Denied due to unsafe state
+
+        if (!is_safe_state()) {
+            // Rollback allocation if unsafe
+            for (int i = 0; i < num_resources; i++) {
+                available[i] += request[i];
+                allocated[tid][i] -= request[i];
+            }
+            printf("[DEBUG] Unsafe state detected: Request denied for Thread %d.\n", tid);
+            pthread_mutex_unlock(&lock);
+            return -1; // Denied due to unsafe state
+        }
+
+        printf("[DEBUG] Request granted for Thread %d (safe state).\n", tid);
+    } else {
+        // For deadlock detection mode, grant the request without checking safety
+        for (int i = 0; i < num_resources; i++) {
+            available[i] -= request[i];
+            allocated[tid][i] += request[i];
+        }
+
+        printf("[DEBUG] Request granted for Thread %d (no deadlock avoidance).\n", tid);
     }
 
-    // Grant the request
-    printf("[DEBUG] Request granted for Thread %d.\n", tid);
+    // Clear pending requests for the thread
     for (int i = 0; i < num_resources; i++) {
-        requested[tid][i] = 0; // Clear pending request
+        requested[tid][i] = 0;
     }
 
     pthread_mutex_unlock(&lock);
-    return 0;
+
+    // For avoid = 0, detect and resolve deadlocks after granting the request
+    if (!deadlock_avoidance) {
+        reman_detect();
+    }
+
+    return 0; // Request granted
 }
+
 
 
 
@@ -345,6 +349,7 @@ int reman_detect() {
     pthread_mutex_unlock(&lock);
     return deadlock_count;
 }
+
 
 
 void reman_print(char title[]) {
