@@ -51,7 +51,6 @@ void *threadfunc1(void *a)
     reman_connect(tid);
     setarray(claim, NUMR, 1, 1, 1, 0, 0); // Claim resources
     reman_claim(claim);
-    sleep(2);
     setarray(request1, NUMR, 1, 0, 0, 0, 0); // Request resources
     pr(tid, "REQ", NUMR, request1);
     if (reman_request(request1) == 0)
@@ -89,7 +88,6 @@ void *threadfunc2(void *a)
     reman_connect(tid);
     setarray(claim, NUMR, 0, 1, 1, 1, 0); // Claim resources
     reman_claim(claim);
-    sleep(1);
     setarray(request1, NUMR, 0, 1, 0, 0, 0); // Request resources
     pr(tid, "REQ", NUMR, request1);
     if (reman_request(request1) == 0)
@@ -187,7 +185,7 @@ int main(int argc, char **argv)
     sleep(2);
 
     count = 0;
-    while (count < 20)
+    while (count < 10)
     {
         sleep(1);
 
