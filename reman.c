@@ -245,7 +245,6 @@ int reman_release(int release[]) {
         return -1; // Invalid thread ID
     }
 
-    printf("[DEBUG] Thread %d releasing resources: ", tid);
     for (int i = 0; i < num_resources; i++) {
         printf("%d ", release[i]);
     }
