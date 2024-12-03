@@ -48,11 +48,12 @@ int is_safe_state() {
     }
     printf("\n");
 
-    int found = 1; // Indicates if a thread was found that can finish
-    while (found) {
-        found = 0;
+    int found; // Used to track progress in the loop
+    do {
+        found = 0; // Reset progress indicator for each pass
+
         for (int tid = 0; tid < num_threads; tid++) {
-            if (!finish[tid]) { // If the thread hasn't finished yet
+            if (!finish[tid]) { // Check if the thread has not yet finished
                 int can_finish = 1;
                 for (int i = 0; i < num_resources; i++) {
                     // Check if the thread's requested resources are <= available in work
@@ -71,11 +72,11 @@ int is_safe_state() {
                         work[i] += allocated[tid][i];
                     }
                     finish[tid] = 1; // Mark thread as finished
-                    found = 1; // Indicate progress in this loop
+                    found = 1; // Indicate progress in this pass
                 }
             }
         }
-    }
+    } while (found); // Continue until no more threads can finish
 
     // Debugging: Final state of finish array
     printf("[DEBUG] Final finish array: ");
@@ -95,6 +96,7 @@ int is_safe_state() {
     printf("[DEBUG] System is in a safe state.\n");
     return 1; // Safe state
 }
+
 
 
 int reman_init(int t_count, int r_count, int avoid) {
@@ -168,17 +170,19 @@ int reman_request(int request[]) {
     int tid = find_tid();
     if (tid == -1) {
         pthread_mutex_unlock(&lock);
-        return -1;
+        return -1; // Error: thread not connected
     }
 
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    ts.tv_sec += TIMEOUT;
+    printf("[DEBUG] Thread %d requesting resources: ", tid);
+    for (int i = 0; i < num_resources; i++) {
+        printf("%d ", request[i]);
+    }
+    printf("\n");
 
     while (1) {
+        // Check if the request exceeds availability or maximum claim
         int can_allocate = 1;
         for (int i = 0; i < num_resources; i++) {
-            // Check if the request exceeds available resources or the max claim
             if (request[i] > available[i] || request[i] + allocated[tid][i] > max_claim[tid][i]) {
                 can_allocate = 0;
                 break;
@@ -186,50 +190,40 @@ int reman_request(int request[]) {
         }
 
         if (can_allocate) {
-            // Deadlock avoidance mode: Check if the state remains safe
-            if (deadlock_avoidance) {
-                // Temporarily allocate resources to test for safety
-                for (int i = 0; i < num_resources; i++) {
-                    available[i] -= request[i];
-                    allocated[tid][i] += request[i];
-                }
-
-                // Check if the new state is safe
-                if (!is_safe_state()) {
-                    // Rollback allocation if unsafe
-                    for (int i = 0; i < num_resources; i++) {
-                        available[i] += request[i];
-                        allocated[tid][i] -= request[i];
-                    }
-                    printf("[DEBUG] Request denied to maintain safe state.\n");
-                    pthread_mutex_unlock(&lock);
-                    return -1; // Deny request
-                }
-            } else {
-                // No deadlock avoidance: Allocate resources immediately
-                for (int i = 0; i < num_resources; i++) {
-                    available[i] -= request[i];
-                    allocated[tid][i] += request[i];
-                }
-            }
-
-            // Reset request after fulfilling it
+            // Temporarily allocate resources for safety check
             for (int i = 0; i < num_resources; i++) {
-                requested[tid][i] = 0;
+                available[i] -= request[i];
+                allocated[tid][i] += request[i];
             }
 
-            pthread_mutex_unlock(&lock);
-            return 0; // Request granted
-        } else {
-            // Wait for resources if unavailable
-            int res = pthread_cond_timedwait(&cond[tid], &lock, &ts);
-            if (res == ETIMEDOUT) {
-                pthread_mutex_unlock(&lock);
-                return -1; // Timeout
+            // Check if state is safe
+            if (deadlock_avoidance && !is_safe_state()) {
+                // Rollback if unsafe
+                for (int i = 0; i < num_resources; i++) {
+                    available[i] += request[i];
+                    allocated[tid][i] -= request[i];
+                }
+                printf("[DEBUG] Unsafe state detected: Thread %d blocked.\n", tid);
+                pthread_cond_wait(&cond[tid], &lock); // Block until resources change
+                continue; // Retry request
             }
+
+            // Grant request
+            for (int i = 0; i < num_resources; i++) {
+                requested[tid][i] = 0; // Clear pending requests
+            }
+            pthread_mutex_unlock(&lock);
+            printf("[DEBUG] Request granted for Thread %d.\n", tid);
+            return 0;
+        } else {
+            // Block if resources unavailable
+            printf("[DEBUG] Resources unavailable: Thread %d blocked.\n", tid);
+            pthread_cond_wait(&cond[tid], &lock); // Block until resources change
         }
     }
 }
+
+
 
 
 int reman_release(int release[]) {
@@ -237,38 +231,45 @@ int reman_release(int release[]) {
     int tid = find_tid();
     if (tid == -1) {
         pthread_mutex_unlock(&lock);
-        return -1;
+        return -1; // Error: thread not connected
     }
 
+    printf("[DEBUG] Thread %d releasing resources: ", tid);
+    for (int i = 0; i < num_resources; i++) {
+        printf("%d ", release[i]);
+    }
+    printf("\n");
+
+    // Release resources and notify waiting threads
     for (int i = 0; i < num_resources; i++) {
         if (release[i] > allocated[tid][i]) {
             pthread_mutex_unlock(&lock);
-            return -1;
+            return -1; // Error: trying to release more than allocated
         }
         available[i] += release[i];
         allocated[tid][i] -= release[i];
     }
-    pthread_cond_broadcast(&cond[tid]); // Notify threads waiting for resources
+    pthread_cond_broadcast(&cond[tid]); // Notify all waiting threads
     pthread_mutex_unlock(&lock);
     return 0;
 }
 
+
 int reman_detect() {
     pthread_mutex_lock(&lock);
     int deadlock_count = 0;
-
-    // Array to track which threads are in deadlock
     int deadlocked_threads[MAXT] = {0};
 
+    // Check for deadlock
     for (int tid = 0; tid < num_threads; tid++) {
-        int is_stuck = 1;
+        int is_deadlocked = 1;
         for (int i = 0; i < num_resources; i++) {
             if (requested[tid][i] > 0) {
-                is_stuck = 0;
+                is_deadlocked = 0;
                 break;
             }
         }
-        if (is_stuck && thread_status[tid] && allocated[tid][0] > 0) {
+        if (is_deadlocked && thread_status[tid]) {
             deadlocked_threads[tid] = 1;
             deadlock_count++;
         }
@@ -276,8 +277,7 @@ int reman_detect() {
 
     if (deadlock_count > 0) {
         printf("[DEBUG] Deadlock detected with %d threads.\n", deadlock_count);
-
-        // Preempt resources from deadlocked threads
+        // Preempt resources from one deadlocked thread
         for (int tid = 0; tid < num_threads; tid++) {
             if (deadlocked_threads[tid]) {
                 printf("[DEBUG] Preempting resources from Thread %d.\n", tid);
@@ -285,7 +285,8 @@ int reman_detect() {
                     available[i] += allocated[tid][i];
                     allocated[tid][i] = 0;
                 }
-                pthread_cond_broadcast(&cond[0]); // Notify waiting threads
+                pthread_cond_broadcast(&cond[tid]);
+                break; // Resolve one deadlock at a time
             }
         }
     } else {
@@ -295,6 +296,7 @@ int reman_detect() {
     pthread_mutex_unlock(&lock);
     return deadlock_count;
 }
+
 void reman_print(char title[]) {
     pthread_mutex_lock(&lock);
     printf("##########################\n");
