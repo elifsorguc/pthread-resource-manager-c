@@ -51,7 +51,7 @@ void *threadfunc1(void *a)
     reman_connect(tid);
     setarray(claim, NUMR, 1, 1, 1, 0, 0); // Claim resources
     reman_claim(claim);
-
+    sleep(2);
     setarray(request1, NUMR, 1, 0, 0, 0, 0); // Request resources
     pr(tid, "REQ", NUMR, request1);
     if (reman_request(request1) == 0)
@@ -89,7 +89,7 @@ void *threadfunc2(void *a)
     reman_connect(tid);
     setarray(claim, NUMR, 0, 1, 1, 1, 0); // Claim resources
     reman_claim(claim);
-
+    sleep(1);
     setarray(request1, NUMR, 0, 1, 0, 0, 0); // Request resources
     pr(tid, "REQ", NUMR, request1);
     if (reman_request(request1) == 0)
@@ -128,7 +128,6 @@ void *threadfunc3(void *a)
     reman_connect(tid);
     setarray(claim, NUMR, 1, 0, 0, 1, 1); // Claim resources
     reman_claim(claim);
-
     setarray(request1, NUMR, 1, 0, 0, 0, 0); // Request resources
     pr(tid, "REQ", NUMR, request1);
     if (reman_request(request1) == 0)
@@ -175,14 +174,17 @@ int main(int argc, char **argv)
     else
         reman_init(NUMT, NUMR, 0);
 
-    // Create threads with different behaviors
-    for (i = 0; i < NUMT; ++i)
-    {
-        tids[i] = i;
-        pthread_create(&(threadArray[i]), NULL, (void *)((i == 0) ? threadfunc1 : (i == 1) ? threadfunc2
-                                                                                           : threadfunc3),
-                       (void *)&tids[i]);
-    }
+    // Declare and initialize thread IDs
+    tids[0] = 0;
+    pthread_create(&(threadArray[0]), NULL, (void *)threadfunc1, (void *)&tids[0]);
+
+    tids[1] = 1;
+    pthread_create(&(threadArray[1]), NULL, (void *)threadfunc2, (void *)&tids[1]);
+
+    tids[2] = 2;
+    pthread_create(&(threadArray[2]), NULL, (void *)threadfunc3, (void *)&tids[2]);
+
+    sleep(2);
 
     count = 0;
     while (count < 20)
